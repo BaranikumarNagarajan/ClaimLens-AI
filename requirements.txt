@@ -1,0 +1,10 @@
+streamlit>=1.36.0
+pandas>=2.2.0
+numpy>=1.26.0
+psycopg2-binary>=2.2.0
+tavily-python>=0.3.0
+python-dotenv>=1.0.1
+huggingface_hub>=0.32.0
+matplotlib>=3.8.0
+fastapi>=0.110.0
+uvicorn>=0.29.0

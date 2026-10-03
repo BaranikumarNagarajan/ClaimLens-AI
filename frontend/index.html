@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClaimLens AI · Claim Investigation Engine</title>
+  <link rel="icon" type="image/png" href="/static/logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css?v=4" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/static/logo.png" alt="ClaimLens logo" class="brand-logo" />
+      <div>
+        <h1>ClaimLens</h1>
+        <p>AI / ML Claim Investigation Engine</p>
+      </div>
+    </div>
+    <div class="topbar-meta">
+      <span id="status-pill" class="pill pill-idle">Ready</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel input-panel">
+      <h2>Investigation</h2>
+      <label for="question">Question</label>
+      <textarea id="question" rows="5" placeholder="Example: Model A has 92% accuracy and 88% F1 score, while Model B has 90% accuracy and 91% F1 score."></textarea>
+
+      <div class="examples">
+        <span class="examples-label">Try an example</span>
+        <div class="examples-list" id="examples-list">
+          <button type="button" class="example-chip" data-q="Model A has 92% accuracy and 88% F1 score, while Model B has 90% accuracy and 91% F1 score.">Metric trade-off</button>
+          <button type="button" class="example-chip" data-q="Across 100 evaluation tasks: Model A - 35 tasks, Model B - 25 tasks, Model C - 20 tasks, Model D - 12 tasks, Model E - 8 tasks. Show the distribution.">Outcome distribution</button>
+          <button type="button" class="example-chip" data-q="On the MMLU benchmark, Model X scored 86% accuracy while Model Y scored 84% accuracy.">Benchmark claim</button>
+        </div>
+      </div>
+
+      <details class="advanced">
+        <summary>Advanced options <span class="advanced-note">(optional)</span></summary>
+        <label for="market">Market / Country <span class="field-hint">— scopes evidence search to a country</span></label>
+        <input id="market" type="text" placeholder="Optional — e.g. Netherlands" />
+
+        <label for="domain">Domain <span class="field-hint">— evaluation context for the claim</span></label>
+        <input id="domain" type="text" value="AI / ML evaluation" />
+      </details>
+
+      <button id="run-button" class="primary-button">Run investigation</button>
+      <p class="hint">Analyze quantitative claims, compare reported metrics, and identify limitations in the available evidence.</p>
+    </aside>
+
+    <section class="report" id="report">
+      <div class="empty-state" id="empty-state">
+        <h2>Investigation report</h2>
+        <p>Run an investigation to generate a structured report with comparisons, charts, evidence, and a summary.</p>
+      </div>
+
+      <div class="loading hidden" id="loading">
+        <div class="spinner"></div>
+        <p>Running investigation — retrieving evidence and building comparisons…</p>
+      </div>
+
+      <div id="report-content" class="hidden">
+        <section class="card" id="section-overview">
+          <h2>Overview</h2>
+          <div class="stat-grid" id="stat-grid"></div>
+        </section>
+
+        <section class="card hidden" id="section-summary">
+          <h2>Summary</h2>
+          <p id="summary-text" class="summary-text"></p>
+          <p class="meta-line" id="summary-meta"></p>
+        </section>
+
+        <section class="card hidden" id="section-distribution">
+          <h2>User-Reported Outcome Distribution</h2>
+          <p class="caption">Reported task outcomes only; this distribution is not a measure of overall model quality.</p>
+          <div class="stat-grid" id="distribution-stats"></div>
+          <div class="table-wrap"><table id="distribution-table"></table></div>
+          <div class="charts" id="distribution-charts"></div>
+        </section>
+
+        <section class="card hidden" id="section-comparisons">
+          <h2>Metric Comparisons</h2>
+          <p class="caption">Claim values and source-reported comparisons are shown separately. Metrics are never added into a shared score.</p>
+          <div id="comparison-tables"></div>
+        </section>
+
+        <section class="card hidden" id="section-charts">
+          <h2>Charts</h2>
+          <div class="charts" id="metric-charts"></div>
+        </section>
+
+        <section class="card hidden" id="section-evidence">
+          <h2>Evidence</h2>
+          <div class="table-wrap"><table id="evidence-table"></table></div>
+        </section>
+
+        <section class="card hidden" id="section-comparability">
+          <h2>Evidence Comparability</h2>
+          <div class="table-wrap"><table id="comparability-table"></table></div>
+        </section>
+
+        <section class="card hidden" id="section-limitations">
+          <h2>Limitations</h2>
+          <ul id="limitations-list"></ul>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span class="footer-text">ClaimLens AI · Built by Baranikumar Nagarajan</span>
+    <a class="footer-github" href="https://github.com/BaranikumarNagarajan" target="_blank" rel="noopener" aria-label="GitHub profile">
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>
+      </svg>
+      <span>GitHub</span>
+    </a>
+  </footer>
+
+  <script src="/static/app.js?v=4"></script>
+</body>
+</html>
