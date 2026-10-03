@@ -44,8 +44,43 @@ def _figure_to_base64(figure) -> str:
     return base64.b64encode(buffer.read()).decode("ascii")
 
 
+def _standings_charts(result: dict) -> list[dict]:
+    """One ranked bar chart per metric for multi-model (3+) claims."""
+    charts: list[dict] = []
+    for standing in result.get("metric_standings") or []:
+        rows = standing.get("rows") or []
+        if len(rows) < 3:
+            continue
+        labels = [row["model"] for row in reversed(rows)]
+        values = [row["display"] for row in reversed(rows)]
+        colors = [
+            BRAND_COLORS[0] if row.get("is_best") else "#8fa8c9"
+            for row in reversed(rows)
+        ]
+        figure, axis = plt.subplots(figsize=(8, max(2.4, 0.5 * len(labels) + 1)))
+        bars = axis.barh(labels, values, color=colors)
+        axis.bar_label(bars, padding=4, fmt="%g")
+        axis.set_title(f"{standing['metric'].replace('_', ' ').title()} · Ranked comparison")
+        axis.set_xlabel("Reported value")
+        axis.grid(axis="x", alpha=0.2)
+        axis.set_axisbelow(True)
+        figure.tight_layout()
+        charts.append(
+            {
+                "kind": "metric_standings",
+                "title": f"{standing['metric'].replace('_', ' ').title()} · Ranked comparison",
+                "image": _figure_to_base64(figure),
+            }
+        )
+    return charts
+
+
 def _comparison_charts(result: dict) -> list[dict]:
     charts: list[dict] = []
+    # Multi-model claims use one ranked chart per metric instead of pairwise charts.
+    standings_charts = _standings_charts(result)
+    if standings_charts:
+        return standings_charts
     comparison_groups = [
         ("Claim values", result.get("claim_metric_results") or []),
         ("Same-source model comparisons", result.get("external_model_comparisons") or []),

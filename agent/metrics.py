@@ -27,6 +27,7 @@ METRIC_DEFINITIONS = {
     "coding": {"patterns": [r"\bcoding\b", r"\bcode generation\b"], "direction": "higher_is_better"},
     "factuality": {"patterns": [r"\bfactuality\b", r"\bfactual accuracy\b"], "direction": "higher_is_better"},
     "math": {"patterns": [r"\bmath\b", r"\bmathematics\b", r"\bmaths\b"], "direction": "higher_is_better"},
+    "benchmark_score": {"patterns": [r"\bbenchmark scores?\b(?!\s+is\b)", r"\bbenchmark results?\b"], "direction": "higher_is_better"},
 }
 
 
@@ -83,16 +84,17 @@ BENCHMARK_PATTERNS = {
 
 
 MODEL_NAME_PATTERNS = [
-    r"\bgpt(?:[\s-]?\d+(?:\.\d+)?)(?:[\s-]?(?:turbo|instruct|mini|preview))?\b",
-    r"\bgemma(?:[\s-]?\d+(?:\.\d+)?)(?:[\s-]?(?:it|flash|pro))?\b",
+    r"\bgpt[\s-]?\d+(?:\.\d+)?(?:[\s-]?(?:turbo|instruct|mini|preview))?\b",
+    r"\bgemma(?:[\s-]?\d+(?:\.\d+)?)?(?:[\s-]?(?:it|flash|pro))?\b",
     r"\bgemini(?:[\s-]?(?:\d+(?:\.\d+)?|pro|flash|ultra))?(?:[\s-]?(?:pro|flash|ultra))?\b",
     r"\bclaude(?:[\s-]?\d+(?:\.\d+)?(?:[\s-]?(?:opus|sonnet|haiku))?)?\b",
     r"\bproduct\s+[a-z0-9]+\b",
-    r"\b(?:bert|llama|resnet|xgboost|random forest|logistic regression|svm|cnn|rnn|transformer|mistral|mixtral|qwen|deepseek|phi|grok|command-r)(?:[- ]?[a-z0-9]+(?:[.-][a-z0-9]+)*)?\b",
+    r"\b(?:bert|llama|resnet|mistral|mixtral|qwen|deepseek|phi|grok)(?:\s?-?\d+(?:\.\d+)?[a-z]?)?\b",
+    r"\b(?:xgboost|random forest|logistic regression|svm|cnn|rnn|transformer)\b",
 ]
 
 
-NUMBER_PATTERN = r"\d+(?:,\d{3})*(?:\.\d+)?"
+NUMBER_PATTERN = r"(?<![A-Za-z0-9])\d+(?:,\d{3})*(?:\.\d+)?(?![A-Za-z0-9])"
 MEASUREMENT_UNITS = {
     "milliseconds": "ms",
     "millisecond": "ms",
@@ -143,7 +145,11 @@ def detect_metrics(text):
                     break
             except Exception:
                 pass
-    return sorted(set(detected))
+    result = sorted(set(detected))
+    # benchmark_score is a generic fallback; drop it when a concrete metric is present.
+    if "benchmark_score" in result and len(result) > 1:
+        result = [metric for metric in result if metric != "benchmark_score"]
+    return result
 
 
 def detect_models(text):
@@ -491,18 +497,52 @@ ANONYMOUS_MODEL_PATTERN = re.compile(
 ANONYMOUS_MODEL_LABELS = ["first model", "second model", "third model", "fourth model"]
 
 
+def _anonymous_role(matched_text):
+    """Map an anonymous mention to a stable role so re-mentions deduplicate."""
+    text = matched_text.lower()
+    if re.search(r"\b(?:previous|prior|older?|earlier)\b", text):
+        return "second model"
+    if re.search(r"\bnew\b", text):
+        return "first model"
+    if re.search(r"\b(?:another|other|second)\b", text):
+        return "second model"
+    if re.search(r"\bfirst\b", text):
+        return "first model"
+    if re.search(r"\bthird\b", text):
+        return "third model"
+    if re.search(r"\bfourth\b", text):
+        return "fourth model"
+    return None
+
+
 def _anonymous_model_mentions(text):
-    mentions = []
+    raw = []
     for match in ANONYMOUS_MODEL_PATTERN.finditer(safe_text(text)):
-        if mentions and match.start() < mentions[-1][1]:
+        if raw and match.start() < raw[-1][1]:
             continue
-        mentions.append((match.start(), match.end()))
+        raw.append((match.start(), match.end(), match.group(0)))
+    if len(raw) < 2:
+        return []
+
+    # Assign a stable role to each mention; re-mentions of the same role reuse it.
+    roles = []
+    unnamed_index = 0
+    for start, end, matched in raw:
+        role = _anonymous_role(matched)
+        if role is None:
+            role = ANONYMOUS_MODEL_LABELS[min(unnamed_index, len(ANONYMOUS_MODEL_LABELS) - 1)]
+            unnamed_index += 1
+        roles.append((start, end, role))
+
+    # Keep only the first occurrence of each role, in text order.
+    seen_roles = {}
+    for start, end, role in roles:
+        if role not in seen_roles:
+            seen_roles[role] = (start, end, role)
+    mentions = sorted(seen_roles.values(), key=lambda item: item[0])
     if len(mentions) < 2:
         return []
-    return [
-        (start, end, ANONYMOUS_MODEL_LABELS[index])
-        for index, (start, end) in enumerate(mentions[: len(ANONYMOUS_MODEL_LABELS)])
-    ]
+    return mentions
 
 
 def _anonymous_value(number_text, has_percent, metric):
@@ -578,15 +618,17 @@ def _supplement_anonymous_pair_values(question, metrics, rows):
                 flags=re.IGNORECASE,
             )
             if compared:
+                # "compared with" states both values explicitly, so it overrides
+                # any segment-extracted value for the same (model, metric).
+                override_metrics.add(metric)
                 pairs = (
                     ("first model", compared.group("first"), bool(compared.group("first_pct"))),
                     ("second model", compared.group("second"), bool(compared.group("second_pct"))),
                 )
                 for label, raw, has_percent in pairs:
                     normalized = _anonymous_value(raw, has_percent, metric)
-                    if normalized and (label, metric) not in covered:
+                    if normalized:
                         value, unit, measurement_unit = normalized
-                        covered.add((label, metric))
                         additions.append(
                             {
                                 "model": label,
@@ -596,6 +638,38 @@ def _supplement_anonymous_pair_values(question, metrics, rows):
                                 "measurement_unit": measurement_unit,
                                 "direction": direction,
                                 "raw_text": compared.group(0),
+                            }
+                        )
+                break
+            # "the new model has an F1 of 81%, while the previous model has 89%"
+            while_match = re.search(
+                r"new\s+(?:[a-z0-9-]+[\s-]){0,3}(?:model|version)[^0-9.]{0,30}?"
+                + pattern
+                + r"[^0-9.]{0,20}?(?P<first>" + NUMBER_PATTERN + r")\s*(?P<first_pct>%)?"
+                + r"[^0-9.]{0,40}?\bwhile\b[^0-9.]{0,50}?(?:previous|prior|old)\s+(?:model|version)"
+                + r"[^0-9.]{0,30}?(?:" + pattern + r")?[^0-9.]{0,20}?(?P<second>" + NUMBER_PATTERN + r")\s*(?P<second_pct>%)?",
+                question,
+                flags=re.IGNORECASE,
+            )
+            if while_match:
+                override_metrics.add(metric)
+                pairs = (
+                    ("first model", while_match.group("first"), bool(while_match.group("first_pct"))),
+                    ("second model", while_match.group("second"), bool(while_match.group("second_pct"))),
+                )
+                for label, raw, has_percent in pairs:
+                    normalized = _anonymous_value(raw, has_percent, metric)
+                    if normalized:
+                        value, unit, measurement_unit = normalized
+                        additions.append(
+                            {
+                                "model": label,
+                                "metric": metric,
+                                "value": value,
+                                "unit": unit,
+                                "measurement_unit": measurement_unit,
+                                "direction": direction,
+                                "raw_text": while_match.group(0),
                             }
                         )
                 break
@@ -635,17 +709,90 @@ def build_user_claim_rows(question):
 
     rows = []
     for model, segment in segments:
+        normalized_model = normalize_model_name(model)
+        segment_row_count = 0
         for metric in metrics:
-            for observation in extract_metric_values(segment, metric):
+            observations = extract_metric_values(segment, metric)
+            if observations:
+                for observation in observations:
+                    rows.append(
+                        {
+                            "model": normalized_model,
+                            "metric": metric,
+                            "value": observation["value"],
+                            "unit": observation["unit"],
+                            "measurement_unit": observation["measurement_unit"],
+                            "direction": observation["direction"],
+                            "raw_text": observation["raw_text"],
+                        }
+                    )
+                    segment_row_count += 1
+                continue
+            # Fallback: assign a bare score only when this segment produced no
+            # metric values at all (e.g. "Gemma achieves 84%" or "Model A = 72").
+            # If the segment already yielded a value for another metric, its
+            # numbers belong to that metric — never steal them.
+            if segment_row_count > 0:
+                continue
+            definition = METRIC_DEFINITIONS.get(metric, {})
+            direction = definition.get("direction", "context_dependent")
+            value_match = re.search(
+                r"(?P<value>" + NUMBER_PATTERN + r")\s*(?P<pct>%)?",
+                segment,
+            )
+            if value_match:
+                normalized = _anonymous_value(
+                    value_match.group("value"),
+                    bool(value_match.group("pct")),
+                    metric,
+                )
+                if normalized:
+                    value, unit, measurement_unit = normalized
+                    rows.append(
+                        {
+                            "model": normalized_model,
+                            "metric": metric,
+                            "value": value,
+                            "unit": unit,
+                            "measurement_unit": measurement_unit,
+                            "direction": direction,
+                            "raw_text": segment.strip(),
+                        }
+                    )
+
+    # If the claim names a single metric but models carry bare scores with no
+    # metric keyword (e.g. "Model A = 72"), treat the metric as that score.
+    if metrics:
+        covered_pairs = {(row["model"], row["metric"]) for row in rows}
+        single_metric = metrics[0]
+        definition = METRIC_DEFINITIONS.get(single_metric, {})
+        direction = definition.get("direction", "context_dependent")
+        for model, segment in segments:
+            normalized_model = normalize_model_name(model)
+            if (normalized_model, single_metric) in covered_pairs:
+                continue
+            value_match = re.search(
+                r"(?P<value>" + NUMBER_PATTERN + r")\s*(?P<pct>%)?",
+                segment,
+            )
+            if not value_match:
+                continue
+            normalized = _anonymous_value(
+                value_match.group("value"),
+                bool(value_match.group("pct")),
+                single_metric,
+            )
+            if normalized:
+                value, unit, measurement_unit = normalized
                 rows.append(
                     {
-                        "model": normalize_model_name(model),
-                        "metric": metric,
-                        "value": observation["value"],
-                        "unit": observation["unit"],
-                        "measurement_unit": observation["measurement_unit"],
-                        "direction": observation["direction"],
-                        "raw_text": observation["raw_text"],
+                        "model": normalized_model,
+                        "metric": single_metric,
+                        "value": value,
+                        "unit": unit,
+                        "measurement_unit": measurement_unit,
+                        "direction": direction,
+                        "raw_text": segment.strip(),
                     }
                 )
 

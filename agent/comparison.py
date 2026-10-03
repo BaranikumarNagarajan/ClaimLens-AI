@@ -38,6 +38,7 @@ METRIC_FAMILIES = {
     "coding": "benchmark_quality",
     "factuality": "benchmark_quality",
     "math": "benchmark_quality",
+    "benchmark_score": "benchmark_quality",
     "dataset_size": "dataset_context",
     "parameter_count": "model_context",
     "latency": "efficiency",
@@ -141,7 +142,8 @@ def compare_claim_metrics(claim_observations):
             )
 
     preferred_models = {row["preferred_model"] for row in metric_results if row["preferred_model"] != "equal"}
-    if len(preferred_models) > 1:
+    distinct_metrics = {row["metric"] for row in metric_results}
+    if len(distinct_metrics) > 1 and len(preferred_models) > 1:
         comparison_type = "MULTI_METRIC_TRADEOFF"
     elif metric_results and preferred_models:
         comparison_type = "CONSISTENT_REPORTED_ADVANTAGE"
@@ -150,10 +152,58 @@ def compare_claim_metrics(claim_observations):
     else:
         comparison_type = "COMPARISON_UNAVAILABLE"
 
+    metric_standings = _build_metric_standings(claim_observations, models, metrics)
+
     return {
         "models": models,
         "metrics": metrics,
         "comparison_available": bool(metric_results),
         "comparison_type": comparison_type,
         "metric_results": metric_results,
+        "metric_standings": metric_standings,
     }
+
+
+def _build_metric_standings(claim_observations, models, metrics):
+    """Build a per-metric ranked table (one row per model) for N-model claims."""
+    standings = []
+    for metric in metrics:
+        direction = METRIC_DEFINITIONS.get(metric, {}).get("direction", "context_dependent")
+        rows = []
+        for model in models:
+            matching = [
+                observation
+                for observation in claim_observations
+                if observation.get("model") == model and observation.get("metric") == metric
+            ]
+            if len(matching) != 1:
+                continue
+            normalized = _claim_value(matching[0], metric)
+            if normalized is None:
+                continue
+            value, display, percentage_scale = normalized
+            rows.append(
+                {
+                    "model": model,
+                    "value": value,
+                    "display": display,
+                    "unit": matching[0].get("measurement_unit") or ("%" if percentage_scale else ""),
+                    "direction": direction,
+                }
+            )
+        if len(rows) < 2:
+            continue
+        reverse = direction != "lower_is_better"
+        rows.sort(key=lambda row: row["value"], reverse=reverse)
+        best_value = rows[0]["value"]
+        for rank, row in enumerate(rows, start=1):
+            row["rank"] = rank
+            row["is_best"] = row["value"] == best_value and direction != "context_dependent"
+        standings.append(
+            {
+                "metric": metric,
+                "direction": direction,
+                "rows": rows,
+            }
+        )
+    return standings

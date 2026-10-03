@@ -576,6 +576,7 @@ def run_claimlens_pipeline(
         "comparable_metrics": comparable_metrics,
         "metric_results": comparison["metric_results"],
         "claim_metric_results": claim_metric_results,
+        "metric_standings": comparison.get("metric_standings", []),
         "external_model_comparisons": external_model_comparisons,
         "external_model_observations": external_model_observations,
         "display_metric_results": display_metric_results,

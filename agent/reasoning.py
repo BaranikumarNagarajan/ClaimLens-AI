@@ -23,6 +23,7 @@ METRIC_LABELS = {
     "coding": "Coding",
     "factuality": "Factuality",
     "math": "Math",
+    "benchmark_score": "Benchmark score",
 }
 
 
@@ -55,31 +56,80 @@ def build_reasoning(
         )
 
     if tradeoff:
-        findings = []
-        for result in metric_results:
-            if result["preferred_model"] == "equal":
-                continue
-            label = METRIC_LABELS.get(result["metric"], result["metric"].replace("_", " ").title())
-            preferred = result["preferred_model"].title()
-            difference = f"{result['display_difference']:g} {result['difference_unit']}"
-            findings.append(f"{label} favors {preferred} by {difference}")
-        summary = (
-            "The reported metrics are mixed: "
-            + "; ".join(findings)
-            + ". This is a metric-level trade-off, so the available values do not establish one overall winner."
-        )
+        standings = comparison.get("metric_standings") or []
+        if standings:
+            # Multi-model: describe each metric's ranked leader from standings.
+            findings = []
+            for standing in standings:
+                rows = standing.get("rows") or []
+                if not rows:
+                    continue
+                label = METRIC_LABELS.get(standing["metric"], standing["metric"].replace("_", " ").title())
+                best = rows[0]
+                runner_up = rows[1] if len(rows) > 1 else None
+                if runner_up is not None:
+                    gap = abs(best["display"] - runner_up["display"])
+                    findings.append(
+                        f"{label}: {best['model'].title()} leads at {best['display']:g}"
+                        f" (ahead of {runner_up['model'].title()} at {runner_up['display']:g} by {gap:g})"
+                    )
+                else:
+                    findings.append(f"{label}: {best['model'].title()} leads at {best['display']:g}")
+            leaders = {standing["rows"][0]["model"] for standing in standings if standing.get("rows")}
+            if len(leaders) == 1:
+                leader = next(iter(leaders))
+                summary = (
+                    f"{leader.title()} has the most favorable reported value across all compared metrics: "
+                    + "; ".join(findings)
+                    + ". This describes the supplied metrics only and does not establish overall model quality."
+                )
+            else:
+                summary = (
+                    "The reported metrics are mixed: "
+                    + "; ".join(findings)
+                    + ". This is a metric-level trade-off, so the available values do not establish one overall winner."
+                )
+        else:
+            findings = []
+            for result in metric_results:
+                if result["preferred_model"] == "equal":
+                    continue
+                label = METRIC_LABELS.get(result["metric"], result["metric"].replace("_", " ").title())
+                preferred = result["preferred_model"].title()
+                difference = f"{result['display_difference']:g} {result['difference_unit']}"
+                findings.append(f"{label} favors {preferred} by {difference}")
+            summary = (
+                "The reported metrics are mixed: "
+                + "; ".join(findings)
+                + ". This is a metric-level trade-off, so the available values do not establish one overall winner."
+            )
         interpretation = (
             "Metric-level trade-off detected. The reported metrics do not establish a single overall conclusion; "
             "no aggregate score or overall winner has been inferred."
         )
     elif metric_results and comparison["comparison_type"] == "CONSISTENT_REPORTED_ADVANTAGE":
-        favored = next(row["preferred_model"] for row in metric_results if row["preferred_model"] != "equal")
+        # For 3+ models, the pairwise "preferred model" is ambiguous; the ranked
+        # standings leader is the correct answer.
+        standings = comparison.get("metric_standings") or []
+        leaders = [
+            standing["rows"][0]["model"]
+            for standing in standings
+            if standing.get("rows") and standing["rows"][0].get("is_best")
+        ]
+        if leaders:
+            favored = leaders[0]
+        else:
+            favored = next(row["preferred_model"] for row in metric_results if row["preferred_model"] != "equal")
         favored_metrics = [
+            METRIC_LABELS.get(standing["metric"]) or standing["metric"].replace("_", " ").title()
+            for standing in standings
+            if standing.get("rows") and standing["rows"][0].get("is_best") and standing["rows"][0]["model"] == favored
+        ] or [
             METRIC_LABELS.get(row["metric"]) or row["metric"].replace("_", " ").title()
             for row in metric_results
             if row["preferred_model"] == favored
         ]
-        labels = ", ".join(favored_metrics)
+        labels = ", ".join(dict.fromkeys(favored_metrics))
         summary = (
             f"{favored.title()} has the more favorable reported values for {labels}. "
             "This describes the supplied comparable metrics only and does not establish overall model quality."

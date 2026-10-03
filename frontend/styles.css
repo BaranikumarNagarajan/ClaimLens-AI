@@ -175,6 +175,14 @@ th {
 tbody tr:hover { background: #f6fafa; }
 td a { color: var(--teal); word-break: break-all; }
 
+.best-badge {
+  display: inline-block; margin-left: 6px;
+  padding: 1px 8px; border-radius: 999px;
+  background: #e7f4f4; color: var(--teal);
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+
 .charts { display: grid; gap: 18px; }
 .chart-card {
   border: 1px solid var(--line); border-radius: 10px;

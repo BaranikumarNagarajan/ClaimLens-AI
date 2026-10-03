@@ -121,6 +121,38 @@ function renderComparisons(result) {
   container.innerHTML = "";
   let any = false;
 
+  const standings = result.metric_standings || [];
+  if (standings.length) {
+    any = true;
+    for (const standing of standings) {
+      const wrap = document.createElement("div");
+      wrap.className = "table-wrap";
+      const metricName = (standing.metric || "").replace(/_/g, " ");
+      wrap.innerHTML = `<h3>${escapeHtml(metricName)} · ranked comparison</h3><table></table>`;
+      container.appendChild(wrap);
+      buildTable(
+        wrap.querySelector("table"),
+        [
+          { key: "rank", label: "Rank" },
+          {
+            key: "model",
+            label: "Model",
+            render: (r) =>
+              r.is_best ? `<strong>${escapeHtml(r.model)}</strong> <span class="best-badge">best</span>` : escapeHtml(r.model),
+          },
+          { key: "value", label: "Value" },
+          { key: "note", label: "Direction" },
+        ],
+        standing.rows.map((row) => ({
+          rank: row.rank,
+          model: row.model,
+          value: `${formatValue(row.display)}${row.unit || ""}`,
+          note: (row.direction || "").replace(/_/g, " "),
+        }))
+      );
+    }
+  }
+
   const claimResults = result.claim_metric_results || [];
   if (claimResults.length) {
     any = true;
