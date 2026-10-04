@@ -666,7 +666,7 @@ The project therefore intentionally communicates uncertainty and limitations ins
 
 Baranikumar Nagarajan
 
-AI/ML | Generative AI | RAG | Agentic AI | UAV Technology
+AI/ML | Generative AI | RAG | Agentic AI 
 
 GitHub:
 
